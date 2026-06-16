@@ -1,0 +1,142 @@
+import matplotlib
+matplotlib.use('TkAgg') 
+
+import pandas as pd
+import numpy as npgene
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.preprocessing import StandardScaler
+
+# 绘图设置
+sns.set_theme(style='whitegrid')
+plt.rcParams['font.sans-serif'] = ['SimHei']
+plt.rcParams['axes.unicode_minus'] = False
+
+# ------------------------------
+# 1. 加载数据
+# ------------------------------
+train = pd.read_csv('train.csv')
+test = pd.read_csv('test.csv')
+
+print("训练集形状:", train.shape)
+print("测试集形状:", test.shape)
+
+# ------------------------------
+# 2. 选择特征列
+# ------------------------------
+feature_cols = ['LotArea', 'YearBuilt', 'YearRemodAdd', 'MasVnrArea', 'BsmtFinSF1',
+                'BsmtFinSF2', 'BsmtUnfSF', 'TotalBsmtSF', '1stFlrSF', '2ndFlrSF',
+                'LowQualFinSF', 'GrLivArea', 'BsmtFullBath', 'BsmtHalfBath',
+                'FullBath', 'HalfBath', 'BedroomAbvGr', 'KitchenAbvGr',
+                'TotRmsAbvGrd', 'Fireplaces', 'GarageCars', 'GarageArea',
+                'WoodDeckSF', 'OpenPorchSF', 'EnclosedPorch', '3SsnPorch',
+                'ScreenPorch', 'PoolArea', 'MiscVal']
+
+X_train_raw = train[feature_cols].copy()
+X_test_raw = test[feature_cols].copy()
+y = train['SalePrice']
+
+# ------------------------------
+# 3. 用训练集各列的中位数填充缺失值（训练集和测试集）
+# ------------------------------
+medians = X_train_raw.median()          # 计算训练集每列中位数
+X_train_raw = X_train_raw.fillna(medians)   # 填充训练集
+X_test_raw = X_test_raw.fillna(medians)     # 填充测试集（使用同样的中位数）
+
+print("\n训练集缺失值统计（应为0）:\n", X_train_raw.isnull().sum().sum())
+print("测试集缺失值统计（应为0）:\n", X_test_raw.isnull().sum().sum())
+
+# ------------------------------
+# 4. 特征选择：取与 SalePrice 相关性最高的前 K 个
+# ------------------------------
+correlations = X_train_raw.corrwith(y).sort_values(ascending=False)
+print("\n各特征与SalePrice的相关系数:\n", correlations)
+
+top_k = 8
+top_features = correlations.abs().nlargest(top_k).index.tolist()
+print(f"\n选择的前 {top_k} 个特征: {top_features}")
+
+X_train = X_train_raw[top_features]
+X_test = X_test_raw[top_features]
+
+# ------------------------------
+# 5. 划分训练集和验证集
+# ------------------------------
+X_train_split, X_val, y_train_split, y_val = train_test_split(
+    X_train, y, test_size=0.2, random_state=42
+)
+
+# ------------------------------
+# 6. 特征标准化
+# ------------------------------
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train_split)
+X_val_scaled = scaler.transform(X_val)
+X_test_scaled = scaler.transform(X_test)
+
+# ------------------------------
+# 7. 训练线性回归模型
+# ------------------------------
+model = LinearRegression()
+model.fit(X_train_scaled, y_train_split)
+
+coef_df = pd.DataFrame({
+    '特征': top_features,
+    '系数': model.coef_
+})
+print("\n模型系数:\n", coef_df)
+print(f"截距: {model.intercept_:.2f}")
+
+# ------------------------------
+# 8. 验证集评估
+# ------------------------------
+y_pred_val = model.predict(X_val_scaled)
+mse = mean_squared_error(y_val, y_pred_val)
+rmse = np.sqrt(mse)
+r2 = r2_score(y_val, y_pred_val)
+
+print(f"\n验证集评估:")
+print(f"MSE  = {mse:.2f}")
+print(f"RMSE = {rmse:.2f}")
+print(f"R²   = {r2:.4f}")
+
+# ------------------------------
+# 9. 可视化
+# ------------------------------
+plt.figure(figsize=(12, 5))
+
+plt.subplot(1, 2, 1)
+plt.scatter(y_val, y_pred_val, alpha=0.6)
+plt.plot([y_val.min(), y_val.max()], [y_val.min(), y_val.max()], 'r--', lw=2)
+plt.xlabel('真实价格')
+plt.ylabel('预测价格')
+plt.title('真实 vs 预测 (验证集)')
+
+plt.subplot(1, 2, 2)
+residuals = y_val - y_pred_val
+plt.scatter(y_pred_val, residuals, alpha=0.6)
+plt.axhline(y=0, color='r', linestyle='--', lw=2)
+plt.xlabel('预测价格')
+plt.ylabel('残差')
+plt.title('残差图')
+
+plt.tight_layout()
+plt.savefig('linear_regression_eval.png', dpi=300)
+plt.show()
+
+# ------------------------------
+# 10. 对测试集预测并生成提交文件
+# ------------------------------
+y_test_pred = model.predict(X_test_scaled)
+
+submission = pd.DataFrame({
+    'Id': test['Id'],
+    'SalePrice': y_test_pred
+})
+
+submission.to_csv('submission.csv', index=False)
+print("\n预测结果已保存为 submission.csv")
+print("前10行预测:\n", submission.head(10))
